@@ -1,127 +1,138 @@
-# Abstrax Monitoring
+# Abstrax Monitoring Plugin
 
-`abstrax-monitoring` is the official Abstrax plugin for local Linux host and process monitoring. The CLI is `abstrax monitoring …`. It collects from `/proc` and `/sys`, keeps a durable SQLite history on the server, and answers queries over a root-only Unix socket.
+Free, open-source host and process monitoring for an Abstrax server. Metrics stay on the machine, in a local SQLite history.
 
-It does not talk to ServerAuth, the agent, the gateway, or Console. A future heartbeat can read `latest.json`. This plugin does not change the heartbeat.
+Binary: `abstrax-monitoring` → `abstrax monitoring …`  
+Trust level: `official`  
+Licence: Apache-2.0  
+OS: Debian/Ubuntu and RHEL-family.
+
+Full user docs: [useabstrax.com/docs/plugins/official/monitoring](https://useabstrax.com/docs/plugins/official/monitoring)
+
+## What it does
+
+A root daemon samples `/proc` and `/sys` and stores the results under `/var/lib/abstrax/plugins/monitoring/`. The CLI talks to that daemon over a Unix socket.
+
+- Host CPU, memory, swap, load, uptime, and aggregate disk and network rates
+- Capacity and inodes for each real filesystem mount
+- Per-process CPU, memory, disk I/O, and a stable `instance_id` that survives PID reuse and reboot
+- History with automatic rollups, plus a live NDJSON stream
+- A storage ceiling so the database cannot grow without limit
+
+Sampling defaults to 5s for the host and processes, and 60s for filesystems. The daemon runs as root so it can read every process. The state directory is mode `0700`. The database, socket, and `latest.json` are mode `0600`. Command lines are truncated before they are stored, and they are not written to the log.
 
 ## Install
-
-Release archives are `linux-amd64` and `linux-arm64`. Which distributions those binaries run on is Abstrax's platform matrix (`docs/reference/supported-platforms.md`). Setup asks `abstrax doctor --json` and refuses a host the CLI does not support. Collectors do not branch on distribution.
 
 ```bash
 sudo abstrax plugin install monitoring
 sudo abstrax monitoring setup
-abstrax monitoring status
+abstrax monitoring version
 ```
 
-`setup` creates directories, writes the default config when none exists, installs and starts `abstrax-monitoring.service`, and waits until the daemon answers. An existing config file is kept.
+`setup` checks the host with `abstrax doctor`, writes the default config when none exists, installs `abstrax-monitoring.service`, and waits for the daemon to answer. An existing config file is left in place.
+
+Local build:
+
+```bash
+go build -o bin/abstrax-monitoring ./cmd/abstrax-monitoring
+sudo cp bin/abstrax-monitoring /usr/local/lib/abstrax/plugins/
+```
+
+Tagged releases (`v*`) publish linux-amd64 / linux-arm64 archives and `plugin-manifest.json`.
 
 | Path | Purpose |
-|---|---|
+|------|---------|
 | `/usr/local/lib/abstrax/plugins/abstrax-monitoring` | Plugin binary |
-| `/etc/abstrax/plugins/monitoring/config.yaml` | Configuration, mode `0600` |
-| `/var/lib/abstrax/plugins/monitoring/metrics.db` | SQLite history, mode `0600` |
-| `/var/lib/abstrax/plugins/monitoring/latest.json` | Small vitals file for a future heartbeat |
-| `/var/lib/abstrax/plugins/monitoring/monitoring.sock` | Root-only daemon socket |
+| `/etc/abstrax/plugins/monitoring/config.yaml` | Configuration |
+| `/var/lib/abstrax/plugins/monitoring/metrics.db` | SQLite history |
+| `/var/lib/abstrax/plugins/monitoring/latest.json` | Latest vitals |
+| `/var/lib/abstrax/plugins/monitoring/monitoring.sock` | Daemon socket |
 | `/etc/systemd/system/abstrax-monitoring.service` | systemd unit |
 
-A non-root process uses the XDG config and data directories instead. The daemon is intended to run as root: it must read every process, and v1 access is root-only. There is no monitoring group. The state directory is mode `0700`. Command lines are stored truncated and are not written to the log.
+## Quick start
 
-## How it runs
+```bash
+sudo abstrax monitoring setup
+sudo abstrax monitoring status
+sudo abstrax monitoring latest
 
-The daemon owns collection, SQLite, retention, rollups, queries, and live subscribers. CLI commands other than `run` dial the socket. They do not open the database.
+sudo abstrax monitoring history \
+  --from=2026-11-08T00:00:00Z \
+  --to=2026-11-08T12:00:00Z
 
-Collection intervals default to 5s for the host and processes and 60s for filesystems. The first host sample is a baseline, so `latest.json` appears on the second host sample. Filesystem `statfs` runs off the sampler goroutine, one probe per mount, so a hung mount cannot stall collection.
+sudo abstrax monitoring processes --sort=cpu --limit=10
+sudo abstrax monitoring live
+```
 
-Shutdown on SIGTERM or SIGINT checkpoints SQLite and exits. SIGHUP reloads the config file. A bad config makes `run` exit 78, and the unit sets `RestartPreventExitStatus=78` so systemd does not restart-loop.
+`latest.json` is rewritten after each host sample once a baseline exists, so the file appears on the second sample. It holds `schema_version`, `collected_at`, the expected interval, and vitals: CPU, memory, the fullest filesystem, 1-minute load, and CPU cores.
 
 ## Commands
 
+The socket is root-only. Query commands need `sudo` when the daemon is running as root.
+
+| Command | Root? | Description |
+|---------|-------|-------------|
+| `monitoring setup` | yes | Config, systemd unit, and the first sample |
+| `monitoring config` | yes (writes) | Show or change intervals, retention, rollups, and the storage ceiling |
+| `monitoring start` / `stop` / `restart` | yes | Control the systemd unit |
+| `monitoring install-service` | yes | Install and enable the unit |
+| `monitoring uninstall-service` | yes | Stop and remove the unit |
+| `monitoring status` | yes | Daemon health, retention, and database size |
+| `monitoring latest` | yes | Current host, filesystems, and top processes |
+| `monitoring history` | yes | One page of host and filesystem history |
+| `monitoring processes` | yes | Current processes, or `--at` a past time |
+| `monitoring process <instance-id>` | yes | One process, including after it has exited |
+| `monitoring process history <instance-id>` | yes | History for that instance |
+| `monitoring live` | yes | NDJSON samples. Use `--json-stream` |
+| `monitoring storage status` | yes | Database size, oldest sample, and the storage ceiling |
+| `monitoring run` | yes | Run the daemon in the foreground |
+| `monitoring version` | no | Plugin version |
+
 Globals: `--json`, `--json-stream`, `--yes`, `--verbose`, `--quiet`, `--no-color`, `--config`, `--state-dir`.
 
-| Command | What it does |
-|---|---|
-| `setup` | Platform check, directories, default config, systemd install, first sample |
-| `config` | Show or change intervals, retention, rollups, and the storage ceiling |
-| `start` / `stop` / `restart` | Control the systemd unit |
-| `status` | Daemon health, not the current sample. A stopped daemon is data, exit 0 |
-| `latest` | Newest host, filesystem, and top-process summary |
-| `history --from --to [--max-points] [--cursor]` | One aligned host and filesystem page |
-| `processes [--at] [--sort] [--limit] [--name]` | Current processes, or the processes responsible at a past time |
-| `process <instance-id>` | One process instance, including after it has exited |
-| `process history <instance-id> --from --to` | History for that instance |
-| `live` | NDJSON samples (`--json-stream`; `--json` is rejected) |
-| `storage status` | Database size, effective retention, and whether the ceiling is binding |
-| `install-service` / `uninstall-service` | Manage the systemd unit |
-| `run` | Foreground daemon |
-| `version` | Plugin version |
-| `plugin metadata` | Plugin metadata protocol v1. Only `live` is streamable |
+`monitoring live` prints one JSON object per sample (`"type": "sample"`) and rejects `--json`. Other commands use the usual Abstrax result envelope. `data.schema_version` is `1`.
 
-`config` validates before saving and asks the running daemon to reload. Sub-second polling is rejected. Retention windows must increase (`raw < short < medium < long < maximum`). Rollup widths must increase and each width must be a multiple of the finer one.
+`config` checks the new values before saving, then asks the running daemon to reload. Intervals must be whole seconds of at least 1s. Retention windows must increase (`raw < short < medium < long < maximum`). Each rollup width must be coarser than the one before it, and a multiple of that finer width.
 
-## What is collected
+A bad config makes `run` exit 78. The unit sets `RestartPreventExitStatus=78`, so systemd does not restart-loop. SIGTERM and SIGINT flush SQLite and exit. SIGHUP reloads the config file.
 
-Host: CPU usage, user, system, iowait, and steal as percentages of the host (0–100; iowait is not counted as busy); CPU cores; memory and swap bytes plus usage percent (`61.4` means 61.4%); load; uptime; aggregate disk and network bytes per second. Loopback, virtual interfaces that would double-count traffic, partitions, loop devices, and stacked disks are skipped.
+```bash
+sudo abstrax monitoring config --host-interval=5s --max-storage=1GB
+journalctl -u abstrax-monitoring -f
+```
 
-Filesystems: one series per real mount. `proc`, `tmpfs`, `overlay`, `squashfs`, and the other pseudo types are skipped. Each point has mount, device, type, total, used, available, usage, and inodes.
+## Metrics
 
-Processes: PID, PPID, boot id, starttime ticks, start time, name, executable, truncated command line, user, Linux CPU percent (this can exceed 100), RSS, memory percent, read and write bytes per second, threads, and state. The public `instance_id` is the first 16 bytes of SHA-256 over boot id, PID, and starttime, hex encoded. A recycled PID or a reboot does not merge history. A process seen once is stored immediately, so it can still be attributed if it exits before a rate exists. Exited processes stay queryable until retention deletes them.
+**Host.** CPU usage, user, system, iowait, and steal as a percentage of the machine (0–100). CPU usage is user, system, irq, softirq, and steal. Also cores, memory and swap in bytes and percent, load, uptime, and aggregate disk and network bytes per second. Loopback, bridge and veth-style interfaces, partitions, loop devices, and stacked disks are left out of the totals.
 
-Per-core, per-interface, and per-device history are not stored. The schema can gain those series later without a new database.
+**Filesystems.** One series per real mount: device, type, total, used, available, usage, and inodes. `proc`, `sysfs`, `tmpfs`, `devtmpfs`, `overlay`, and `squashfs` are skipped. `statfs` runs off the sampler, one probe per mount.
+
+**Processes.** PID, PPID, boot id, start time, name, executable, command line, user, CPU percent, RSS, memory percent, read and write bytes per second, threads, and state. Process CPU is the Linux figure and can exceed 100 on a machine with more than one core. `instance_id` is derived from boot id, PID, and starttime, so a recycled PID is a new series. Exited processes remain queryable until retention removes them.
 
 ## History and storage
 
-SQLite is CGO-free (`modernc.org/sqlite`), WAL, `synchronous=FULL`, one connection, `user_version` migrations. The public `schema_version` is 1 and is not the plugin version or the SQLite `user_version`. SQL is not part of the API.
+History is one page: one `from`, one `to`, and one resolution for the host and every filesystem. `--max-points` defaults to 240 and cannot exceed 500. Pass `--cursor` from the previous page to continue. A cursor fails if those rows have since been deleted or rolled into a coarser tier. Missing samples stay missing.
 
-Defaults, all configurable:
+Defaults:
 
-| Tier | Width | Kept until |
-|---|---|---|
-| raw | sampling interval (stored as resolution 0) | 1 hour |
+| Tier | Width | Kept for |
+|------|-------|----------|
+| raw | sampling interval | 1 hour |
 | short | 15s | 6 hours |
-| medium | 1m | 24 hours |
-| long | 5m | 7 days |
-| archive | 1h | 90 days |
+| medium | 1 minute | 24 hours |
+| long | 5 minutes | 7 days |
+| archive | 1 hour | 90 days |
 
-Gauges roll up as sum, max, and count, so a bucket average is not an average of averages. Rates store byte deltas and duration; the average rate is total bytes over total duration, and the max is the highest observed rate. A timestamp lives at one resolution. Rollup and delete of a tier run in one transaction.
+Gauges keep a sum, a max, and a count. Rates keep byte deltas and duration, so the average is total bytes over total time, and the max is the highest rate seen in the bucket.
 
-`history` picks the finest tier that can cover the window within `--max-points` (default 240, hard maximum 500) and stays under about 768 KiB so a page fits an agent result. Host and filesystem points share one `from`, `to`, and resolution. Gaps are missing samples, not fabricated zeros. The cursor is opaque and pinned to that page's resolution; it fails if the underlying rows have been deleted or rolled up. There is no bulk export and no page numbers.
+The storage ceiling defaults to `1GB` (1000000000 bytes) and takes priority over the time limits. The oldest rows are deleted, collection continues, and `storage status` reports both the configured retention and the oldest sample still on disk. `storage_constrained` is true when the database is at least 80% of the ceiling and the history on disk is shorter than the configured maximum.
 
-The storage ceiling (default `1GB`, decimal, 1000000000 bytes) wins over time retention. The oldest rows are deleted, collection continues, and `storage status` reports both the configured horizon and the oldest sample actually kept. `storage_constrained` is true when the database is at least 80% of the ceiling and the retained span is shorter than the configured maximum by more than one archive bucket. A young database under the ceiling is not constrained.
-
-## Live samples and latest.json
-
-`monitoring live` prints one JSON object per host sample, with `"type": "sample"`. It is not a job-progress envelope. The same host sample is committed before it is published. The message also carries the latest persisted filesystems and the top 15 processes by CPU. Each subscriber has a buffer of 4. A slow client is disconnected. There is no spool, and one client cannot block collection or the others. At most 8 subscribers.
-
-`latest.json` is written by temp file, chmod `0600`, and rename. It contains `schema_version`, `collected_at`, `expected_interval_seconds`, and `vitals` (`cpu_usage_pct`, `memory_usage_pct`, `disk_usage_pct_max`, `disk_usage_mount`, `load_1m`, `cpu_cores`). It is not a full dump.
-
-## Measured cost
-
-`TestResourceProfile` (`go test ./internal/store/ -run TestResourceProfile`) on darwin/arm64, one process pass over a fixture `/proc` plus one SQLite write and a top-25 query. The heap figure is the test process, not a long-running Linux daemon. Database bytes include a fresh SQLite file, so the 25-process file is mostly overhead.
-
-| Processes | Collect | Write | Top-25 query | Database |
-|---|---|---|---|---|
-| 25 | 0.68 ms | 1.82 ms | 0.30 ms | 145 KiB |
-| 100 | 2.62 ms | 5.12 ms | 0.24 ms | 181 KiB |
-| 250 | 6.80 ms | 12.3 ms | 0.32 ms | 233 KiB |
-| 500 | 12.3 ms | 23.7 ms | 0.47 ms | 322 KiB |
-| 1000 | 26.3 ms | 47.9 ms | 0.63 ms | 479 KiB |
-
-From the 25-process file (148136 bytes) and the 1000-process file (490096 bytes), a process sample costs about 350 bytes once the fresh database is subtracted. Steady-state size is bounded by the storage ceiling. Collection at the default 5s interval is far below one core at 1000 processes in this fixture. Re-run the test on a Linux server before treating these numbers as production RSS.
+SQLite uses WAL and `synchronous=FULL`, through `modernc.org/sqlite`, with a single connection.
 
 ## Development
 
-No Makefile. From `plugins/monitoring`:
-
 ```bash
-gofmt -w .
-go vet ./...
 go test -race ./...
+go vet ./...
 go build -o bin/abstrax-monitoring ./cmd/abstrax-monitoring
 ```
-
-Tests drive collectors from a fixture `/proc` and `/sys`. They do not read the machine they run on. systemd install is rendered and asserted; this tree's development host is not the place those tests start a real unit.
-
-## Out of scope
-
-Console, ServerAuth, the agent, the gateway, heartbeat protocol changes, alerting, logs, journald, a central store, remote shell, process kill, tracing, and Prometheus, Netdata, OpenTelemetry, or Grafana export. Threshold events are not emitted.
