@@ -1,0 +1,23 @@
+{
+  "name": "monitoring",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "requires_abstrax": ">=0.1.0",
+  "channel": "stable",
+  "publisher": "useabstrax",
+  "trust_level": "official",
+  "description": "Local Linux host and process monitoring with on-server history",
+  "display_name": "Monitoring",
+  "platforms": {
+    "linux-amd64": {
+      "url": "https://github.com/useabstrax/abstrax/releases/download/v0.1.0/abstrax-monitoring_0.1.0_linux_amd64.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 123456
+    },
+    "linux-arm64": {
+      "url": "https://github.com/useabstrax/abstrax/releases/download/v0.1.0/abstrax-monitoring_0.1.0_linux_arm64.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 123456
+    }
+  }
+}

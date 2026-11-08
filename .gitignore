@@ -1,0 +1,42 @@
+# Build outputs
+/bin/
+/dist/
+/abstrax-monitoring
+plugin-manifest.json
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+vendor/
+
+# Coverage
+coverage.out
+coverage.html
+*.coverprofile
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Logs
+*.log
