@@ -1,0 +1,27 @@
+# Listing copy for plugins:discover. Versions come from release manifests.
+
+plugin:
+  name: monitoring
+  slug: monitoring
+  display_name: Abstrax Monitoring
+  description: Lightweight local Linux monitoring and history for Abstrax servers
+  long_description: |
+    The Monitoring Plugin collects host, filesystem, and process metrics on the
+    server and keeps the history in a local SQLite database. A root daemon
+    samples /proc and /sys and the CLI talks to it over a Unix socket. Metrics
+    stay on the machine.
+
+    Commands include setup, config, start, stop, restart, status, latest,
+    history, processes, process, live, and storage. Debian/Ubuntu and
+    RHEL-family are supported.
+  trust_level: official
+  status: active
+  featured: true
+  homepage_url: https://plugins.useabstrax.com/plugins/monitoring
+  repository_url: https://github.com/useabstrax/monitoring
+  documentation_url: https://useabstrax.com/docs/plugins/official/monitoring
+  license: Apache-2.0
+
+publisher:
+  name: Abstrax
+  slug: useabstrax
